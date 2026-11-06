@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VAShield | Vulnerability Assessment Orchestrator</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { darkMode:'class', theme:{ extend:{ colors:{
+  cyber:{bg:'#080C14',card:'#0E1626',border:'#1E293B',accent:'#06B6D4',accentDark:'#0891B2',
+  critical:'#F43F5E',high:'#F97316',medium:'#FBBF24',low:'#3B82F6',info:'#64748B',success:'#10B981'}
+}}}}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+  body{font-family:'Inter',sans-serif}
+  .mono{font-family:'JetBrains Mono',monospace}
+  ::-webkit-scrollbar{width:6px;height:6px}
+  ::-webkit-scrollbar-thumb{background:#1E293B;border-radius:9999px}
+  details[open] summary .chev{transform:rotate(90deg)}
+  .chev{transition:transform .15s ease}
+  label.field-label{display:block;font-size:.72rem;color:#94A3B8;margin-bottom:.25rem}
+  input.field, select.field{width:100%;background:#0F172A;border:1px solid #334155;border-radius:.6rem;padding:.5rem .7rem;font-size:.82rem}
+  input.field:focus, select.field:focus{outline:none;border-color:#06B6D4}
+</style>
+</head>
+<body class="bg-cyber-bg text-slate-100 min-h-screen antialiased">
+
+<header class="border-b border-cyber-border bg-cyber-card/80 backdrop-blur sticky top-0 z-40">
+  <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+    <div class="flex items-center space-x-3">
+      <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-500 flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      </div>
+      <div>
+        <div class="font-bold tracking-tight">VAShield <span class="text-[10px] mono bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-800 align-middle">LIVE ENGINE</span></div>
+        <p class="text-xs text-slate-400">Real orchestrator — every finding below came from an actual check that ran against the target you configured.</p>
+      </div>
+    </div>
+    <div id="statusBadge" class="flex items-center space-x-2 bg-slate-900 border border-slate-700 px-3 py-1.5 rounded-lg text-xs mono">
+      <span class="relative flex h-2 w-2"><span id="dot" class="relative inline-flex rounded-full h-2 w-2 bg-slate-500"></span></span>
+      <span id="statusText" class="text-slate-400">IDLE</span>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-6 py-6 space-y-6">
+
+  <!-- CONFIG PANEL -->
+  <section class="bg-cyber-card border border-cyber-border rounded-2xl p-5">
+    <h2 class="font-semibold mb-1">1. Target &amp; Scope Configuration</h2>
+    <p class="text-xs text-slate-400 mb-4">This tool refuses to scan a non-local target until ownership is verified via a token published at <span class="mono">/.well-known/security-check.txt</span>. Only run this against systems you own or are explicitly authorized to test.</p>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div>
+        <label class="field-label">Backend API base URL</label>
+        <input id="apiBase" class="field mono" value="{{API}}" onchange="onTargetOrApiChange()" />
+      </div>
+      <div>
+        <label class="field-label">Target base URL</label>
+        <input id="targetUrl" class="field mono" value="{{TARGET_URL}}" onchange="onTargetOrApiChange()" oninput="onTargetOrApiChange()" />
+      </div>
+      <div>
+        <label class="field-label">Ports</label>
+        <input id="ports" class="field mono" value="{{PORTS}}" />
+      </div>
+      <div>
+        <label class="field-label">Scan profile</label>
+        <select id="profile" class="field">
+          <option value="baseline_staging">baseline_staging — standard, non-destructive</option>
+          <option value="baseline_production">baseline_production — conservative, production-safe</option>
+          <option value="full_authenticated">full_authenticated — includes auth/session probes</option>
+          <option value="custom">custom — label only, no built-in behavior change</option>
+        </select>
+      </div>
+      <div class="flex items-end">
+        <label class="flex items-center gap-2 text-sm bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 w-full cursor-pointer">
+          <input type="checkbox" id="intrusive" {{INTRUSIVE_CHECKED}} class="accent-rose-500 w-4 h-4" />
+          <span>Enable intrusive tests <span class="text-rose-400 text-xs">(e.g. JWT alg:none bypass — active probing, confirm you're authorized)</span></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- OWNERSHIP HELPER -->
+    <div id="ownershipPanel" class="mt-4 border border-amber-800/60 bg-amber-950/20 rounded-xl p-4 hidden">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold text-amber-300">Non-local target detected — ownership verification required</h3>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">Request a token, publish it at the path shown, then check the box once it's live. The backend re-verifies this itself before scanning — this checkbox is just a reminder.</p>
+      <div class="flex flex-wrap items-center gap-3 mb-2">
+        <button onclick="requestToken()" class="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-black text-xs font-semibold">Request verification token</button>
+        <label class="flex items-center gap-2 text-xs text-slate-300">
+          <input type="checkbox" id="ownershipConfirmed" class="accent-amber-500 w-4 h-4" />
+          I've published the token at the target
+        </label>
+      </div>
+      <div id="ownershipResult" class="mono text-xs text-amber-200 bg-black/30 rounded-lg p-3 hidden"></div>
+    </div>
+
+    <!-- ADVANCED / DEEP TESTS -->
+    <details class="mt-4 border border-slate-800 rounded-xl">
+      <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium flex items-center gap-2">
+        <span class="chev">▶</span> Advanced: deep test targets (optional)
+      </summary>
+      <div class="p-4 pt-0 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div>
+          <label class="field-label">JWT to analyze</label>
+          <input id="jwtToken" class="field mono" placeholder="eyJhbGciOi..." value="{{JWT}}" />
+        </div>
+        <div>
+          <label class="field-label">Injection test: URL</label>
+          <input id="injUrl" class="field mono" value="{{INJ_URL}}" />
+        </div>
+        <div>
+          <label class="field-label">Injection test: param</label>
+          <input id="injParam" class="field mono" value="{{INJ_PARAM}}" />
+        </div>
+        <div>
+          <label class="field-label">BOLA resource template</label>
+          <input id="bolaTpl" class="field mono" value="{{BOLA_TPL}}" />
+        </div>
+        <div>
+          <label class="field-label">Tenant A token</label>
+          <input id="tenantAToken" class="field mono" value="{{TENANT_A}}" />
+        </div>
+        <div>
+          <label class="field-label">Tenant B object id</label>
+          <input id="tenantBObj" class="field mono" value="{{TENANT_B}}" />
+        </div>
+        <div>
+          <label class="field-label">BFLA admin-only URL</label>
+          <input id="adminUrl" class="field mono" value="{{ADMIN_URL}}" />
+        </div>
+        <div>
+          <label class="field-label">BFLA low-priv token</label>
+          <input id="lowPrivToken" class="field mono" value="{{LOW_PRIV_TOKEN}}" />
+        </div>
+      </div>
+    </details>
+
+    <div class="mt-4 flex items-center gap-3">
+      <button id="startBtn" onclick="Scan.start()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-semibold text-sm">Run Assessment</button>
+      <span id="ownershipNote" class="text-xs text-slate-400"></span>
+    </div>
+  </section>
+
+  <!-- TABS -->
+  <section class="bg-cyber-card border border-cyber-border rounded-2xl overflow-hidden">
+    <div id="tabBar" class="flex overflow-x-auto border-b border-cyber-border"></div>
+    <div id="tabContent" class="p-5 min-h-[200px]"></div>
+  </section>
+
+  <!-- LIVE LOG -->
+  <section class="bg-cyber-card border border-cyber-border rounded-2xl p-5">
+    <h2 class="font-semibold mb-2">2. Live Module Log</h2>
+    <div id="log" class="bg-black/40 rounded-xl p-3 h-56 overflow-y-auto mono text-xs space-y-1"></div>
+  </section>
+
+  <!-- FIX FINDER -->
+  <section class="bg-cyber-card border border-cyber-border rounded-2xl p-5">
+    <h2 class="font-semibold mb-2">3. Fix Finder</h2>
+    <div id="fixList" class="space-y-2 text-sm text-slate-400">Run an assessment to populate remediation guidance.</div>
+  </section>
+
+  <!-- REPORT -->
+  <section class="bg-cyber-card border border-cyber-border rounded-2xl p-5">
+    <h2 class="font-semibold mb-2">4. Complete Report</h2>
+    <button id="reportBtn" onclick="Scan.openReport()" disabled class="px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm disabled:opacity-40">Open Full Report (print to PDF from there)</button>
+  </section>
+
+</main>
+
+<script>
+const PHASES = [
+  {id:"phase-1", name:"TLS / Transport"},
+  {id:"phase-2", name:"HTTP Headers"},
+  {id:"phase-3", name:"Session / JWT"},
+  {id:"phase-4", name:"Injection"},
+  {id:"phase-5", name:"Access Control"},
+  {id:"phase-6", name:"External Tools"},
+];
+let state = { sessionId:null, activeTab:"phase-1", findingsByPhase:{}, allFindings:[] };
+PHASES.forEach(p => state.findingsByPhase[p.id] = []);
+
+// pre-select the profile the generator was configured with
+(function(){
+  const want = "{{PROFILE}}";
+  const sel = document.getElementById("profile");
+  for(const opt of sel.options){ if(opt.value === want){ sel.value = want; break; } }
+})();
+
+function isLocalHost(urlStr){
+  try{
+    const u = new URL(urlStr);
+    const h = u.hostname;
+    return h === "localhost" || h === "127.0.0.1" || h === "::1" ||
+           /^10\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(h);
+  }catch(e){ return true; }
+}
+
+function onTargetOrApiChange(){
+  const t = document.getElementById("targetUrl").value.trim();
+  const panel = document.getElementById("ownershipPanel");
+  if(t && !isLocalHost(t)){ panel.classList.remove("hidden"); }
+  else { panel.classList.add("hidden"); }
+}
+
+async function requestToken(){
+  const api = document.getElementById("apiBase").value.trim();
+  const target = document.getElementById("targetUrl").value.trim();
+  const box = document.getElementById("ownershipResult");
+  box.classList.remove("hidden");
+  box.innerText = "Requesting token...";
+  try{
+    const resp = await fetch(`${api}/api/v1/ownership/request-token?target_url=${encodeURIComponent(target)}`, {method:"POST"});
+    const data = await resp.json();
+    if(!resp.ok){ box.innerText = `Error: ${data.detail || resp.statusText}`; return; }
+    box.innerText = `Host: ${data.host}\nToken: ${data.token}\n\n${data.instructions}`;
+  }catch(e){
+    box.innerText = `Could not reach backend at ${api}: ${e}`;
+  }
+}
+
+function setStatus(text, cls){
+  document.getElementById("statusText").innerText = text;
+  document.getElementById("statusText").className = cls;
+  document.getElementById("dot").className = "relative inline-flex rounded-full h-2 w-2 " + (text==="SCANNING"?"bg-cyan-400":text==="DONE"?"bg-emerald-400":"bg-slate-500");
+}
+
+function renderTabs(){
+  const bar = document.getElementById("tabBar");
+  bar.innerHTML = PHASES.map(p => {
+    const count = state.findingsByPhase[p.id].length;
+    const active = p.id === state.activeTab;
+    return `<button onclick="selectTab('${p.id}')" class="px-4 py-3 text-xs font-medium whitespace-nowrap border-b-2 ${active?'border-cyan-400 text-cyan-300':'border-transparent text-slate-400'}">
+      ${p.name} ${count?`<span class="ml-1 bg-slate-700 text-[10px] px-1.5 py-0.5 rounded-full">${count}</span>`:''}
+    </button>`;
+  }).join("");
+}
+
+function selectTab(id){ state.activeTab = id; renderTabs(); renderTabContent(); }
+
+function renderTabContent(){
+  const findings = state.findingsByPhase[state.activeTab] || [];
+  const el = document.getElementById("tabContent");
+  if(!findings.length){ el.innerHTML = `<p class="text-sm text-slate-500">No findings recorded for this module yet.</p>`; return; }
+  el.innerHTML = findings.map(f => `
+    <div class="border border-slate-800 rounded-xl p-4 mb-3">
+      <div class="flex justify-between items-center mb-1">
+        <span class="text-xs font-bold px-2 py-0.5 rounded-full" style="background:${sevColor(f.severity)}22;color:${sevColor(f.severity)}">${f.severity}</span>
+        <span class="text-[10px] text-slate-500 mono">${f.finding_id} · ${f.cwe}</span>
+      </div>
+      <div class="font-semibold text-sm">${f.title}</div>
+      <div class="text-xs text-slate-400 mt-1">${f.description}</div>
+      <div class="text-[11px] mono text-cyan-300 mt-2 bg-black/30 rounded p-2">${f.evidence}</div>
+    </div>`).join("");
+}
+
+function sevColor(s){ return {CRITICAL:"#F43F5E",HIGH:"#F97316",MEDIUM:"#FBBF24",LOW:"#3B82F6",INFO:"#64748B"}[s]||"#64748B"; }
+
+function addLog(level, message){
+  const box = document.getElementById("log");
+  const color = {INFO:"text-slate-400",WARN:"text-amber-400",CRIT:"text-rose-400",SUCCESS:"text-emerald-400"}[level]||"text-slate-400";
+  const line = document.createElement("div");
+  line.className = color;
+  line.innerText = `[${level}] ${message}`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderFixList(){
+  const el = document.getElementById("fixList");
+  if(!state.allFindings.length){ el.innerHTML = "No findings yet."; return; }
+  const bySeverityOrder = ["CRITICAL","HIGH","MEDIUM","LOW","INFO"];
+  const sorted = [...state.allFindings].sort((a,b)=>bySeverityOrder.indexOf(a.severity)-bySeverityOrder.indexOf(b.severity));
+  el.innerHTML = sorted.map(f => `
+    <div class="flex items-start justify-between border border-slate-800 rounded-lg p-3">
+      <div>
+        <div class="text-sm font-medium">${f.title}</div>
+        <div class="text-xs text-slate-400 mt-1">${f.remediation}</div>
+      </div>
+      <span class="text-[10px] px-2 py-0.5 rounded-full ml-3 shrink-0" style="background:${sevColor(f.severity)}22;color:${sevColor(f.severity)}">${f.severity}</span>
+    </div>`).join("");
+}
+
+const Scan = {
+  async start(){
+    const api = document.getElementById("apiBase").value.trim();
+    const target_url = document.getElementById("targetUrl").value.trim();
+    const ports = document.getElementById("ports").value.trim();
+    const profile = document.getElementById("profile").value;
+    const intrusive = document.getElementById("intrusive").checked;
+    const jwt_token = document.getElementById("jwtToken").value.trim() || null;
+    const injUrl = document.getElementById("injUrl").value.trim();
+    const injParam = document.getElementById("injParam").value.trim();
+    const bolaTpl = document.getElementById("bolaTpl").value.trim();
+    const tenantAToken = document.getElementById("tenantAToken").value.trim() || null;
+    const tenantBObj = document.getElementById("tenantBObj").value.trim() || null;
+    const adminUrl = document.getElementById("adminUrl").value.trim() || null;
+    const lowPrivToken = document.getElementById("lowPrivToken").value.trim() || null;
+
+    if(target_url && !isLocalHost(target_url) && !document.getElementById("ownershipConfirmed").checked){
+      if(!confirm("You haven't checked \"I've published the token\" for this non-local target. The backend will still enforce this, but the scan will likely be rejected. Continue anyway?")) return;
+    }
+
+    state.findingsByPhase = {}; PHASES.forEach(p => state.findingsByPhase[p.id] = []);
+    state.allFindings = [];
+    document.getElementById("log").innerHTML = "";
+    document.getElementById("reportBtn").disabled = true;
+    renderTabs(); renderTabContent(); renderFixList();
+    setStatus("SCANNING","text-cyan-400 font-bold");
+
+    const body = {
+      target_url, ports, profile, jwt_token, intrusive,
+      injection_targets: injUrl && injParam ? [{url:injUrl, param:injParam, method:"GET"}] : [],
+      bola_resource_template: bolaTpl || null,
+      tenant_a_token: bolaTpl ? (tenantAToken || "tokenA") : null,
+      tenant_b_object_id: bolaTpl ? (tenantBObj || "2") : null,
+      admin_only_url: adminUrl,
+      low_priv_token: lowPrivToken,
+    };
+
+    let resp;
+    try {
+      resp = await fetch(`${api}/api/v1/assessments/start`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    } catch(e) {
+      addLog("CRIT", `Could not reach orchestrator backend at ${api}. Is it running? (${e})`);
+      setStatus("ERROR","text-rose-400"); return;
+    }
+    if(!resp.ok){
+      const err = await resp.json().catch(()=>({detail:resp.statusText}));
+      addLog("CRIT", `Start rejected: ${err.detail}`);
+      setStatus("BLOCKED","text-rose-400"); return;
+    }
+    const data = await resp.json();
+    state.sessionId = data.session_id;
+    document.getElementById("ownershipNote").innerText = data.ownership_note;
+    addLog("INFO", `Session ${data.session_id} started. ${data.ownership_note}`);
+
+    const es = new EventSource(`${api}/api/v1/scans/${data.session_id}/stream`);
+    es.addEventListener("log", (ev) => { const d = JSON.parse(ev.data); addLog(d.level, d.message); });
+    es.addEventListener("finding", (ev) => {
+      const f = JSON.parse(ev.data);
+      state.findingsByPhase[f.phase_id].push(f);
+      state.allFindings.push(f);
+      renderTabs(); if(state.activeTab === f.phase_id) renderTabContent();
+      renderFixList();
+    });
+    es.addEventListener("complete", (ev) => {
+      setStatus("DONE","text-emerald-400 font-bold");
+      document.getElementById("reportBtn").disabled = false;
+      es.close();
+    });
+    es.onerror = () => { /* stream closed after complete, or connection dropped */ };
+  },
+  openReport(){
+    if(!state.sessionId) return;
+    const api = document.getElementById("apiBase").value.trim();
+    window.open(`${api}/api/v1/scans/${state.sessionId}/report`, "_blank");
+  }
+};
+
+onTargetOrApiChange();
+renderTabs(); renderTabContent();
+</script>
+</body>
+</html>
